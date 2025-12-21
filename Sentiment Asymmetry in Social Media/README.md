@@ -7,5 +7,5 @@ This study examines the relationship between tweet sentiment and user engagement
 
 Project Contributors: <br>
 mannan_mishra@ischool.berkeley.edu, mroyal7@ischool.berkeley.edu, fulingw@ischool.berkeley.edu, alexalva@ischool.berkeley.edu <br><br>
-Final Report: [link](https://github.com/mids-w203/lab-2-bayesian-bears-/blob/main/reports/Lab2_Report/Lab2.pdf)<br><br>
+Final Report: [link](https://github.com/mroyal29/portfolio/blob/main/Sentiment%20Asymmetry%20in%20Social%20Media/Report.pdf)<br><br>
 Data Source: Huggingface [tweets](https://huggingface.co/datasets/enryu43/twitter100m_tweets) & [users](https://huggingface.co/datasets/enryu43/twitter100m_users)
