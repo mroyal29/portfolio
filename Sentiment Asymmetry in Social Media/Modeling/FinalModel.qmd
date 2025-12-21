@@ -1,0 +1,338 @@
+---
+title: "Lab2_FinalModel"
+format: html
+editor: visual
+---
+
+## Install packages if needed
+
+```{r}
+install.packages("aws.s3")
+install.packages("readr")
+install.packages("GGally")
+install.packages("moments")
+```
+
+## Pull Train Data from s3
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(jsonlite)
+library(purrr)
+library(aws.s3)
+library(readr)
+
+Sys.setenv("AWS_ACCESS_KEY_ID" = "redacted",
+           "AWS_SECRET_ACCESS_KEY" = "redacted",
+           "AWS_DEFAULT_REGION" = "us-east-1")
+
+bucket <- "tweetsentimentdata"
+file_name <- "Complete_Train_data_filtered.csv"
+
+# Load the CSV file directly into a dataframe
+obj <- get_object(object = file_name, bucket = bucket)
+tweets <- read_csv(rawToChar(obj))
+
+# View the data
+head(tweets)
+```
+
+## Pull Test Data from s3
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(jsonlite)
+library(purrr)
+library(aws.s3)
+library(readr)
+
+Sys.setenv("AWS_ACCESS_KEY_ID" = "redacted",
+           "AWS_SECRET_ACCESS_KEY" = "redacted",
+           "AWS_DEFAULT_REGION" = "us-east-1")
+
+bucket <- "tweetsentimentdata"
+file_name <- "Complete_Test_data_filtered.csv"
+
+# Load the CSV file directly into a dataframe
+obj <- get_object(object = file_name, bucket = bucket)
+tweets <- read_csv(rawToChar(obj))
+
+# View the data
+head(tweets)
+```
+
+## Data processing for modeling
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(jsonlite)
+library(purrr)
+library(readr)
+
+
+tweets_filtered <- tweets %>% 
+  mutate(followers = follower_count) %>% 
+  mutate(engagement = engagement_score) %>% 
+  mutate(sentiment_ = sentiment_2dim_label) %>% #shorten for stargazer 
+  mutate(sentiment_label = sentiment_2dim_label) %>% 
+  mutate(sentiment_score = sentiment_2dim_score) %>% 
+  mutate(topic_ = case_when(
+    topic_new == "politics" ~ "politics",
+    TRUE ~ "other"
+  ))
+
+# # filter out tweets with top 2% engagement scores
+# engagement_98 <- quantile(tweets$engagement, 0.98, na.rm = TRUE)
+# 
+# tweets_filtered <- tweets %>%
+#   filter(engagement < engagement_98)
+
+head(tweets_filtered)
+```
+
+## Final Model (4 model version)
+
+```{r}
+library(stargazer)
+library(sandwich)
+
+tweets_negative_politics <- tweets_filtered %>% 
+  filter(sentiment_label == "negative", 
+         topic_ == "politics")
+
+tweets_positive_politics <- tweets_filtered %>% 
+  filter(sentiment_label == "positive", 
+         topic_ == "politics")
+
+tweets_negative_other <- tweets_filtered %>% 
+  filter(sentiment_label == "negative", 
+         topic_ == "other")
+
+tweets_positive_other <- tweets_filtered %>% 
+  filter(sentiment_label == "positive", 
+         topic_ == "other")
+
+neg_politics = lm(log(engagement) ~ sentiment_score + followers + word_count
+             , data = tweets_negative_politics)
+
+n_pol = neg_politics # shorten for stargazer 
+
+pos_politics = lm(log(engagement) ~ sentiment_score + followers + word_count
+             , data = tweets_positive_politics)
+
+p_pol = pos_politics# shorten for stargazer 
+
+neg_other = lm(log(engagement) ~ sentiment_score + followers + word_count
+             , data = tweets_negative_other)
+
+n_ot = neg_other # shorten for stargazer 
+
+pos_other = lm(log(engagement) ~ sentiment_score + followers + word_count
+             , data = tweets_positive_other)
+
+p_ot = pos_other
+
+# Compute robust standard errors for each model
+np <- vcovHC(neg_politics, type = "HC3")
+pp <- vcovHC(pos_politics, type = "HC3")
+no <- vcovHC(neg_other, type = "HC3")
+po <- vcovHC(pos_other, type = "HC3")
+
+# Use stargazer to display the regression results with robust standard errors
+stargazer::stargazer(
+  n_pol, 
+  p_pol,
+  n_ot, 
+  p_ot,
+  type = "text", 
+  column.labels = c("Negative Politics", "Positive Politics", "Negative Other", "Positive Other"),
+  model.names = FALSE,
+  vcov = list(np, 
+              pp,
+              no, 
+              po)
+)
+```
+
+### Plot the model on top of the data
+
+```{r}
+# Generate a sequence of sentiment scores
+sentiment_seq <- seq(min(tweets_filtered$sentiment_score, na.rm = TRUE),
+                     max(tweets_filtered$sentiment_score, na.rm = TRUE),
+                     length.out = 100)
+
+# Negative politics 
+# Create a new data frame for prediction for negative politics 
+neg_politics_data <- data.frame(sentiment_score = sentiment_seq, followers = mean(tweets_filtered$followers), word_count = round(mean(tweets_filtered$word_count)))
+
+# Calculate residual standard error
+sigma <- summary(neg_politics)$sigma
+
+# Predict log(engagement) and exponentiate to get engagement with adjustment for bias: exp((sigma^2) / 2)
+neg_politics_data$engagement <- exp(predict(neg_politics, newdata = neg_politics_data)) * exp((sigma^2) / 2)
+
+neg_politics_data$sentiment_score = -neg_politics_data$sentiment_score
+
+# Positive politics 
+# Create a new data frame for prediction for positive politics
+pos_politics_data <- data.frame(sentiment_score = sentiment_seq, followers = mean(tweets_filtered$followers), word_count = round(mean(tweets_filtered$word_count)))
+
+# Calculate residual standard error
+sigma <- summary(pos_politics)$sigma
+
+# Predict log(engagement) and exponentiate to get engagement 
+pos_politics_data$engagement <- exp(predict(pos_politics, newdata = pos_politics_data)) * exp((sigma^2) / 2)
+
+# Negative other 
+# Create a new data frame for prediction for negative politics 
+neg_other_data <- data.frame(sentiment_score = sentiment_seq, followers = mean(tweets_filtered$followers), word_count = round(mean(tweets_filtered$word_count)))
+
+# Calculate residual standard error
+sigma <- summary(neg_other)$sigma
+
+# Predict log(engagement) and exponentiate to get engagement
+neg_other_data$engagement <- exp(predict(neg_other, newdata = neg_other_data)) * exp((sigma^2) / 2)
+
+neg_other_data$sentiment_score = -neg_other_data$sentiment_score
+
+# Positive other 
+# Create a new data frame for prediction for positive politics
+pos_other_data <- data.frame(sentiment_score = sentiment_seq, followers = mean(tweets_filtered$followers), word_count = round(mean(tweets_filtered$word_count)))
+
+# Calculate residual standard error
+sigma <- summary(pos_other)$sigma
+
+# Predict log(engagement) and exponentiate to get engagement 
+pos_other_data$engagement <- exp(predict(pos_other, newdata = pos_other_data)) * exp((sigma^2) / 2)
+
+
+# Plot
+ggplot(tweets_filtered, aes(x = sentiment_1dim, y = engagement, color = topic_)) +
+  geom_point(alpha = 0.25, size = 1) +
+  geom_line(data = neg_other_data, aes(x = sentiment_score, y = engagement), color = "#6688BB", size = 1) +
+  geom_line(data = pos_other_data, aes(x = sentiment_score, y = engagement), color = "#6688BB", size = 1) +
+  geom_line(data = neg_politics_data, aes(x = sentiment_score, y = engagement), color = "#ffc000", size = 1) +
+  geom_line(data = pos_politics_data, aes(x = sentiment_score, y = engagement), color = "#ffc000", size = 1) +
+  coord_cartesian(xlim = c(-1, 1), ylim = c(0, 1000)) +
+  scale_color_manual(values = c("other" = "#002676", "politics" = "#ffc000")) +
+  theme_minimal() +
+  labs(
+    title = "Linear Regression",
+    subtitle = "For average followers and word count",
+    x = "Sentiment Score",
+    y = "Engagement",
+    color = "Topic"
+  )
+
+
+```
+
+### Normally distributed residuals? Yes
+
+```{r}
+residuals <- c(resid(neg_politics), resid(pos_politics), resid(neg_other), resid(pos_other))
+hist(residuals, breaks = 30, main = "Histogram of Residuals: with log(engagement)", xlab = "Residuals")
+```
+
+### QQ plot
+
+```{r}
+qqnorm(residuals)
+qqline(residuals, col = "red", lwd = 2)
+```
+
+### Residuals vs Fitted values
+
+```{r}
+residuals<- c(resid(neg_politics), resid(pos_politics), resid(neg_other), resid(pos_other))
+fitted_vals <- c(neg_politics$fitted.values,  pos_politics$fitted.values, neg_other$fitted.values, pos_other$fitted.values)
+
+df_resid <- data.frame(
+  fitted_vals = fitted_vals,
+  resid = residuals
+)
+
+ggplot(df_resid, aes(x = fitted_vals , y = resid)) +
+  geom_point() +
+  labs(title = "Residuals vs Fitted values",
+       x = "Fitted values",
+       y = "Residuals") +
+  theme_minimal()
+```
+
+## Final model (Single Model version)
+
+```{r}
+tweets_filtered$topic_ <- factor(tweets_filtered$topic_)
+tweets_filtered$topic_ <- relevel(tweets_filtered$topic_, ref = "politics")
+
+tweets_filtered$sentiment_label <- factor(tweets_filtered$sentiment_label)
+tweets_filtered$sentiment_label <- relevel(tweets_filtered$sentiment_label, ref = "negative")
+
+mod1_log = lm(log(engagement) ~ sentiment_score*sentiment_*topic_ + followers + word_count + hashtag_bool
+             , data = tweets_filtered)
+
+
+stargazer::stargazer(
+  mod1_log,
+  type="text")
+```
+
+### Normally distributed residuals? Yes
+
+```{r}
+residuals <- resid(mod1_log)
+hist(residuals, breaks = 30, main = "Histogram of Residuals: with log(engagement)", xlab = "Residuals")
+```
+
+### QQ plot
+
+```{r}
+qqnorm(residuals)
+qqline(residuals, col = "red", lwd = 2)
+```
+
+### Residuals vs Fitted values
+
+```{r}
+residuals<- resid(mod1_log)
+fitted_vals <- mod1_log$fitted.values
+
+df_resid <- data.frame(
+  fitted_vals = fitted_vals,
+  resid = residuals
+)
+
+ggplot(df_resid, aes(x = fitted_vals , y = resid)) +
+  geom_point() +
+  labs(title = "Residuals vs Fitted values",
+       x = "Fitted values",
+       y = "Residuals") +
+  theme_minimal()
+```
+
+### Evaluate whether model assumptions are met
+
+```{r}
+# Check if residuals are independent
+resid <- mod1_log$residuals
+obs_stat <- Box.test(resid, lag =10, type="Ljung-Box")
+obs_pval <- obs_stat$p.value
+obs_stat
+n_perm <- 1000
+perm_pval <- numeric(n_perm)
+
+for (i in 1:n_perm) {
+  perm_resid <- sample(resid)  # randomly permute residuals
+  perm_result <- Box.test(perm_resid, lag =10, type="Ljung-Box")
+  perm_pval[i] <- perm_result$p.value
+}
+
+hist(perm_pval, breaks = 30, main = "Permutation Test: Residual Independence",
+     xlab = "p-values")
+abline(v = obs_stat, col = "red", lwd = 2)
+```

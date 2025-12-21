@@ -1,0 +1,700 @@
+---
+title: "Lab2_Data_Visualization"
+format: html
+editor: visual
+---
+
+# Data Visualization
+
+## Load data from s3
+
+```{r}
+install.packages("aws.s3")
+install.packages("readr")
+library(ggplot2)
+library(tidyverse)
+library(jsonlite)
+library(purrr)
+library(aws.s3)
+library(readr)
+
+Sys.setenv("AWS_ACCESS_KEY_ID" = "redacted",
+           "AWS_SECRET_ACCESS_KEY" = "redacted",
+           "AWS_DEFAULT_REGION" = "us-east-1")
+
+bucket <- "tweetsentimentdata"
+```
+
+## Load train dataset
+
+```{r}
+file_name <- "Complete_Train_data_filtered.csv"
+obj <- get_object(object = file_name, bucket = bucket)
+tweets <- read_csv(rawToChar(obj))
+```
+
+## Load test dataset
+
+```{r}
+file_name2 <- "Complete_Test_data_filtered.csv"
+obj2 <- get_object(object = file_name2, bucket = bucket)
+test_tweets <- read_csv(rawToChar(obj2))
+```
+
+## Data processing
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(jsonlite)
+library(purrr)
+library(readr)
+library(patchwork)
+
+
+tweets <- tweets %>% 
+  mutate(followers = follower_count) %>% 
+  mutate(engagement = engagement_score) %>% 
+  mutate(sentiment_label2d = sentiment_2dim_label) %>% 
+  mutate(sentiment_score2d = sentiment_2dim_score) %>%
+  mutate(sentiment_score1d = sentiment_1dim) %>%
+  mutate(topic_ = case_when(
+    topic_new == "politics" ~ "politics",
+    TRUE ~ "other"
+  ))
+
+# filter out tweets with top 2% engagement scores
+engagement_98 <- quantile(tweets$engagement, 0.98, na.rm = TRUE)
+
+tweets_filtered <- tweets %>%
+  filter(engagement < engagement_98)
+
+str(tweets)
+```
+
+#### High-level view of variable distribution
+
+```{r, fig.width=12, fig.height=8}
+tweets %>%
+  select(word_count, followers, textstat_readability, sentiment_score1d, sentiment_score2d, sentiment_score2d) %>%  # select only numeric columns
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal()
+```
+
+### Investigating Engagement Score
+
+-   compare raw vs log transformed before removing any outliers
+-   compare raw vs log transformed after removing 2% outliers
+
+```{r}
+# before filtering outliers
+plot_engagement <- tweets %>% 
+  ggplot(aes(x = engagement)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), bins = 80, fill = "#999999", color = "white") +
+  labs(
+    x = "Engagement (raw)",
+    y = "Proportion",
+    title = "Distribution of Engagement"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Log-transformed engagement
+plot_engagement_log <- tweets %>% 
+  ggplot(aes(x = log(engagement))) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), bins = 80, fill = "#999999", color = "white") +
+  labs(
+    x = "Engagement (log-transformed)",
+    y = "Proportion",
+    title = "Distribution of Log-Engagement"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Combine plots side by side
+plot_engagement | plot_engagement_log
+```
+
+Conclusion: log transformation is effective in removing fat tails in engagement scores
+
+```{r}
+# plot distribution of engagement score to determine whether/what level to remove outliers
+# experimented 2% and 5%
+tweets %>% 
+  ggplot(aes(x = engagement)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), bins = 100, fill = "#999999", color = "white") +
+  geom_vline(aes(xintercept = engagement_98, color = "98th Percentile"), 
+             linetype = "dashed", linewidth = 1) +
+  scale_color_manual(name = "Reference Line", values = c("98th Percentile" = "red")) +
+  labs(x = "Engagement", y = "Proportion", title = "Distribution of Engagement Score") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Conclusion: 2% handles the extreme outliers
+
+```{r}
+# after filtering out 2% outliers
+plot_engagement <- tweets_filtered %>% 
+  ggplot(aes(x = engagement)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), bins = 80, fill = "#999999", color = "white") +
+  labs(
+    x = "Engagement (raw)",
+    y = "Proportion",
+    title = "Distribution of Engagement (removed extreme outliers)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10)  # adjust size here
+  )
+
+# Log-transformed engagement
+plot_engagement_log <- tweets_filtered %>% 
+  ggplot(aes(x = log(engagement))) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), bins = 80, fill = "#999999", color = "white") +
+  labs(
+    x = "Engagement (log-transformed)",
+    y = "Proportion",
+    title = "Distribution of Log-Engagement (removed extreme outliers)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10)  # adjust size here
+  )
+
+# Combine plots side by side
+plot_engagement | plot_engagement_log
+```
+
+**Conclusion:**
+
+After comparing histogram plots, we found log transformation is important in removing the fat tails in engagement scores. Also removing top 2% outliers will help us to avoid potential skew from viral tweets.
+
+### Investigating Sentiment distribution
+
+```{r}
+tweets %>% 
+  ggplot(aes(x = sentiment_score2d, fill = sentiment_label2d)) +
+  geom_histogram(bins = 20, position = "dodge") +
+  labs(x = "Sentiment Score", y = "Count", fill = "Sentiment Label", title="Distribution of Sentiment Score (2 Dimensional)") +
+  scale_fill_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+#### Follower Count distribution
+
+```{r}
+tweets %>% 
+  ggplot(aes(x = followers)) +
+  geom_histogram() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+#### Topic Distribution
+
+```{r}
+tweets %>% 
+  ggplot(aes(x = topic_new)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+tweets %>%
+  ggplot(aes(x = engagement, y =topic_new, color=sentiment_label2d )) +
+  geom_point() +
+  labs(title = "Topic vs Engagement",
+       x = "Topic",
+       y = "Engagement Score") +
+  theme_minimal()
+```
+
+Low topic score
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = topic_score, color = topic_, binwidth = 1) + 
+  geom_histogram() 
+```
+
+#### Word count Distribution
+
+```{r}
+tweets %>% 
+  ggplot(aes(x = word_count)) +
+  geom_histogram() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Investigating the relationship between sentiment score and our possible Y-variables (engagement, likes, retweets, replies and quotes)
+
+Engagement = likes+retweets+replies+quotes
+
+### Sentiment score vs Engagement
+
+Relationship between sentiment score and engagement for negative/positive (Zoomed In)
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(patchwork)
+
+plot1 <- tweets %>%
+  ggplot(aes(x = sentiment_score2d, y = engagement, color = sentiment_label2d)) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_smooth() +
+  scale_color_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  labs(
+    title = "Engagement vs. Sentiment Score",
+    subtitle = "Zoomed out",
+    x = "Sentiment Score",
+    y = "Engagement",
+    color = "Sentiment Label"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    legend.direction = "horizontal"
+  )
+
+plot2 <- tweets %>% 
+  ggplot() + 
+  aes(x = sentiment_score2d, y = engagement, color = sentiment_label2d) + 
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1000)) +  # zooms in
+  geom_point(alpha = 0.25, size = 1) + 
+  geom_smooth() +
+  theme_minimal() +
+  scale_color_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  labs(
+    title = "Engagement vs. Sentiment Score",
+    subtitle = "Zoomed In",
+    x = "Sentiment Score",
+    y = "Engagement",
+    color = "Sentiment Label"
+  ) +
+  theme(
+    legend.position = "bottom",
+    legend.direction = "horizontal"
+  )
+
+plot1 | plot2
+```
+
+### Sentiment score vs likes
+
+Relationship between sentiment score and likes for negative/positive (Zoomed In)
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = sentiment_score2d, y = likes, color = sentiment_label2d) + 
+  theme_minimal() +
+  scale_color_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 700)) +  # zooms in
+  geom_point() + 
+  geom_smooth() + 
+  labs(
+    title = "Likes vs. Sentiment Score",
+    subtitle = "Zoomed In",
+    x = "Sentiment Score",
+    y = "Likes",
+    color = "Sentiment Label"
+  ) 
+```
+
+### Sentiment score vs retweets
+
+Relationship between sentiment score and retweets for negative/positive (Zoomed In)
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = sentiment_score2d, y = retweets,  color = sentiment_label2d) + 
+  theme_minimal() +
+  scale_color_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 150)) +  # zooms in
+  geom_point() + 
+  geom_smooth() + 
+  labs(
+    title = "Retweets vs. Sentiment Score",
+    subtitle = "Zoomed In",
+    x = "Sentiment Score",
+    y = "Retweets",
+    color = "Sentiment Label"
+  ) 
+```
+
+### Sentiment score vs replies
+
+Relationship between sentiment score and replies for negative/positive (Zoomed in)
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = sentiment_score2d, y = replies, color = sentiment_label2d) + 
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 100)) +  # zooms in
+  theme_minimal() +
+  scale_color_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  geom_point() + 
+  geom_smooth() + 
+  labs(
+    title = "Replies vs. Sentiment Score",
+    subtitle = "Zoomed In",
+    x = "Sentiment Score",
+    y = "Replies",
+    color = "Sentiment Label"
+  ) 
+```
+
+### Sentiment score vs quotes
+
+Relationship bettwen sentiment scres and qutoes
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = sentiment_score2d, y = quotes, color = sentiment_label2d) + 
+  coord_cartesian(xlim = c(0, 1), ylim = c(0,50)) +  # zooms in
+  theme_minimal() +
+  scale_color_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  geom_point() + 
+  geom_smooth() + 
+  labs(
+    title = "Quotes vs. Sentiment Score",
+    subtitle = "Zoomed In",
+    x = "Sentiment Score",
+    y = "Quotes",
+    color = "Sentiment Label"
+  ) 
+```
+
+## Investigating Control features
+
+### Followers vs Engagement
+
+Relationship between follower and engagement for negative/positive (Zoomed In)
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = followers, y = engagement, color = sentiment_label2d) + 
+  coord_cartesian(xlim = c(0, 100000), ylim = c(0, 500)) +  # zooms in
+  theme_minimal() +
+  scale_color_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  geom_point() + 
+  geom_smooth() + 
+  labs(
+    title = "Engagement vs. Followers",
+    subtitle = "Zoomed In",
+    x = "Followers",
+    y = "Engagement",
+    color = "Sentiment Label"
+  ) 
+```
+
+### Hashtag count vs Engagement
+
+I don't think we should use this because there is high varience with high hashtag count.
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = hashtag_count, y = engagement, color = sentiment_label2d) + 
+  coord_cartesian(xlim = c(0, 20), ylim = c(0, 2000)) +  # zooms in
+  theme_minimal() +
+  scale_color_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  geom_point() +
+  geom_smooth()  + 
+  labs(
+    title = "Engagement vs. Hashtag Count",
+    subtitle = "Zoomed In",
+    x = "Hashtag Count",
+    y = "Engagement",
+    color = "Sentiment Label"
+  ) 
+```
+
+#### Hashtag bool
+
+Instead we can use a bool just to mark if a tweet has any hashtags or not.
+
+```{r}
+library(dplyr)
+
+summary_df <- tweets %>%
+  group_by(sentiment_label2d, hashtag_bool) %>%
+  summarise(mean_engagement = mean(engagement, na.rm = TRUE), .groups = "drop")
+
+ggplot(summary_df, aes(x = factor(hashtag_bool), y = mean_engagement,
+                       color = sentiment_label2d, group = sentiment_label2d)) +
+  geom_line(aes(group = sentiment_label2d), linewidth = 1) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c(
+    "positive" = "#002676",
+    "negative" = "#ffc000",
+    "neutral" = "#7f7f7f"  # Add fallback if neutral exists
+  )) +
+  theme_minimal() +
+  labs(
+    x = "Hashtag Present",
+    y = "Average Engagement",
+    title = "Average Engagement by Hashtag Presence and Sentiment"
+  )
+```
+
+### Word Count vs engagement
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = word_count, y = engagement, color = sentiment_label2d ) + 
+  coord_cartesian(xlim = c(0, 60), ylim = c(0, 1000)) +  # zooms in
+  theme_minimal() +
+  scale_color_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  geom_point() + 
+  geom_smooth() + 
+  labs(
+    title = "Engagement vs. Word Count",
+    subtitle = "Zoomed In",
+    x = "Word Count",
+    y = "Engagement",
+    color = "Sentiment Label"
+  ) 
+```
+
+### Readability
+
+```{r}
+tweets %>% 
+  # filter(textstat_readability <30) %>%
+  # filter(textstat_readability >-5) %>%
+  ggplot() + 
+  aes(x = textstat_readability, y = engagement, color = sentiment_label2d ) + 
+  coord_cartesian(xlim = c(-5, 30), ylim = c(0, 1000)) +  # zooms in
+  theme_minimal() +
+  scale_color_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  geom_point() + 
+  geom_smooth() + 
+  labs(
+    title = "Engagement vs. Readability",
+    subtitle = "Zoomed In",
+    x = "Readability",
+    y = "Engagement",
+    color = "Sentiment Label"
+  ) 
+```
+
+### Relationship between word count and readability
+
+To see if there is a relationship.
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = textstat_readability, y = word_count, color = sentiment_label2d ) + 
+  coord_cartesian(xlim = c(-5, 30), ylim = c(0, 60)) +  # zooms in
+  theme_minimal() +
+  scale_color_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  geom_point() + 
+  geom_smooth() + 
+  labs(
+    title = "Word Count vs. Readability",
+    subtitle = "Zoomed In",
+    x = "Readability",
+    y = "Word Count",
+    color = "Sentiment Label"
+  ) 
+```
+
+### Mentions
+
+Don't include. There doesn't seem to be a meaningful relationship here.
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = mention_count, y = engagement, color = sentiment_label2d ) + 
+  coord_cartesian(xlim = c(0, 10), ylim = c(0, 5000)) +  # zooms in
+  theme_minimal() +
+  scale_color_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  geom_point() + 
+  geom_smooth() + 
+  labs(
+    title = "Engagement vs. Mentions",
+    subtitle = "Zoomed In",
+    x = "Mentions",
+    y = "Engagement",
+    color = "Sentiment Label"
+  ) 
+```
+
+### Emoji count
+
+Don't include. There doesn't seem to be a meaningful relationship here.
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = emoji_count, y = engagement, color = sentiment_label2d ) + 
+  coord_cartesian(xlim = c(0, 10), ylim = c(0, 5000)) +  # zooms in
+  theme_minimal() +
+  scale_color_manual(values = c("positive" = "#002676", "negative" = "#ffc000")) +
+  geom_point() + 
+  geom_smooth() + 
+  labs(
+    title = "Engagement vs. Emoji Count",
+    subtitle = "Zoomed In",
+    x = "Emoji Count",
+    y = "Engagement",
+    color = "Sentiment Label"
+  ) 
+```
+
+## Topic Investigation
+
+What topics should we include? Should we interact with sentiment label and or sentiment score?
+
+### Negative topics
+
+```{r}
+tweets %>% 
+  filter(sentiment_label2d == "negative") %>% 
+  ggplot() + 
+  aes(x = sentiment_label2d , y = engagement, color = topic_) + 
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 2000)) +  # zooms in
+  theme_minimal() +
+  scale_color_manual(values = c("other" = "#002676", "politics" = "#ffc000")) +
+  geom_point(alpha = 0.25, size = 1) + 
+  geom_smooth() + 
+  labs(
+    title = "Engagement vs. Sentiment Score",
+    subtitle = "Negative Only",
+    x = "Sentiment Score",
+    y = "Engagement",
+    color = "Sentiment Label"
+  ) 
+```
+
+### Positive Topic
+
+```{r}
+tweets %>% 
+  filter(sentiment_label2d == "positive") %>% 
+  ggplot() + 
+  aes(x = sentiment_label2d , y = engagement, color = topic_) + 
+  theme_minimal() +
+  scale_color_manual(values = c("other" = "#002676", "politics" = "#ffc000")) +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1000)) +  # zooms in
+  geom_point(alpha = 0.25, size = 1) + 
+  geom_smooth() + 
+  labs(
+    title = "Engagement vs. Sentiment Score",
+    subtitle = "Positive Only",
+    x = "Sentiment Score",
+    y = "Engagement",
+    col = "Topic"
+  ) 
+```
+
+## 1-Dimensional Plot
+
+### Engagement vs sentiment score
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = sentiment_1dim, y = engagement, color = topic_) + 
+  coord_cartesian(xlim = c(-1, 1), ylim = c(0, 1000)) +  # zooms in
+  theme_minimal() +
+  scale_color_manual(values = c("other" = "#002676", "politics" = "#ffc000")) +
+  geom_point(alpha = 0.25, size = 1) + 
+  geom_smooth() + 
+  labs(
+    title = "Engagement vs. Sentiment Score",
+    subtitle = "Zoomed In",
+    x = "Sentiment Score",
+    y = "Engagement",
+    color = "Topic"
+  ) 
+# +
+#   theme(
+#     legend.position = "bottom",
+#     legend.direction = "horizontal"
+#   )
+```
+
+### Retweets vs Sentiment Score
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = sentiment_1dim, y = retweets, color = topic_) + 
+  coord_cartesian(xlim = c(-1, 1), ylim = c(0, 200)) +  # zooms in
+  theme_minimal() +
+  scale_color_manual(values = c("other" = "#002676", "politics" = "#ffc000")) +
+  geom_point(alpha = 0.25, size = 1) + 
+  geom_smooth() + 
+  labs(
+    title = "Retweets vs. Sentiment Score",
+    subtitle = "Zoomed In",
+    x = "Sentiment Score",
+    y = "Engagement",
+    color = "Topic"
+  ) 
+```
+
+### Zoomed out
+
+```{r}
+tweets %>% 
+  ggplot() + 
+  aes(x = sentiment_1dim, y = engagement, color = topic_) + 
+  # coord_cartesian(xlim = c(-1, 1), ylim = c(0, 1000)) +  # zooms in
+  theme_minimal() +
+  scale_color_manual(values = c("other" = "#002676", "politics" = "#ffc000")) +
+  geom_point(alpha = 0.4, size = 1) + 
+  geom_smooth() + 
+  labs(
+    title = "Engagement vs. Sentiment Score",
+    subtitle = "Zoomed Out",
+    x = "Sentiment Score",
+    y = "Engagement",
+    color = "Topic"
+  ) 
+```
+
+### Data with median smoothing fit
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Create bins of sentiment_1dim
+tweets_binned <- tweets %>%
+  mutate(bin = cut(sentiment_1dim, breaks = seq(-1, 1, by = 0.05))) %>%
+  group_by(bin, topic_) %>%
+  summarize(
+    sentiment_mid = median(sentiment_1dim, na.rm = TRUE),
+    median_engagement = median(engagement, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Plot with median line instead of geom_smooth
+ggplot(tweets, aes(x = sentiment_1dim, y = engagement, color = topic_)) +
+  geom_point(alpha = 0.25, size = 1) +
+  geom_line(data = tweets_binned, aes(x = sentiment_mid, y = median_engagement), size = 1) +
+  coord_cartesian(xlim = c(-1, 1), ylim = c(0, 1000)) +
+  theme_minimal() +
+  scale_color_manual(values = c("other" = "#002676", "politics" = "#ffc000")) +
+  labs(
+    title = "Engagement vs. Sentiment Score",
+    subtitle = "Zoomed In",
+    x = "Sentiment Score",
+    y = "Engagement",
+    color = "Topic"
+  )
+```

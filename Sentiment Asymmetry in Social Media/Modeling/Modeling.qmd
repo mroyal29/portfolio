@@ -1,0 +1,736 @@
+---
+title: "Lab2_Modeling"
+format: revealjs
+editor: visual
+---
+
+## Install packages if needed
+
+```{r}
+install.packages("aws.s3")
+install.packages("readr")
+install.packages("GGally")
+install.packages("moments")
+```
+
+## Pull Train Data from s3
+
+```{r}
+library(aws.s3)
+library(readr)
+
+Sys.setenv("AWS_ACCESS_KEY_ID" = "redacted",
+           "AWS_SECRET_ACCESS_KEY" = "redacted",
+           "AWS_DEFAULT_REGION" = "us-east-1")
+
+bucket <- "tweetsentimentdata"
+file_name <- "Complete_Train_data_filtered.csv"
+
+# Load the CSV file directly into a dataframe
+obj <- get_object(object = file_name, bucket = bucket)
+tweets <- read_csv(rawToChar(obj))
+
+# View the data
+head(tweets)
+```
+
+## Pull Test Data from s3
+
+```{r}
+library(aws.s3)
+library(readr)
+
+Sys.setenv("AWS_ACCESS_KEY_ID" = "redacted",
+           "AWS_SECRET_ACCESS_KEY" = "redacted",
+           "AWS_DEFAULT_REGION" = "us-east-1")
+
+bucket <- "tweetsentimentdata"
+file_name <- "Complete_Test_data_filtered.csv"
+
+# Load the CSV file directly into a dataframe
+obj <- get_object(object = file_name, bucket = bucket)
+tweets <- read_csv(rawToChar(obj))
+
+# View the data
+head(tweets)
+```
+
+## Data processing
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(jsonlite)
+library(purrr)
+library(readr)
+library(stargazer)
+library(sandwich)
+library(lmtest)
+library(moments)
+library(zoo)
+
+
+tweets <- tweets %>% 
+  mutate(followers = follower_count) %>% 
+  mutate(engagement = engagement_score) %>% 
+  mutate(sentiment_label = sentiment_2dim_label) %>% 
+  mutate(sentiment_ = sentiment_2dim_label) %>% #shorten for stargazer 
+  mutate(sentiment_score = sentiment_2dim_score) %>% 
+  mutate(sentiment_label2d = sentiment_2dim_label) %>% 
+  mutate(sentiment_score2d = sentiment_2dim_score) %>%
+  mutate(sentiment_score1d = sentiment_1dim) %>%
+  mutate(hashtag_bool = I(hashtag_count>0)) %>%
+  mutate(topic_ = case_when(
+    topic_new == "politics" ~ "politics",
+    TRUE ~ "other"
+  ))
+
+
+# # filter out tweets with top 2% engagement scores
+# engagement_98 <- quantile(tweets$engagement, 0.98, na.rm = TRUE)
+# 
+# tweets_filtered <- tweets %>%
+#   filter(engagement < engagement_98)
+
+tweets_filtered <- tweets
+
+head(tweets_filtered)
+```
+
+# Model Building
+
+### Model 1: Engagement vs Follower Count (single X variable)
+
+```{r}
+options(width = 200)
+# plug in follower_count, find the best polynomial for follower_count
+mod1a <- lm(engagement ~ followers, data = tweets)
+mod1b <- lm(engagement ~ followers + I(followers^2), data = tweets)
+mod1c <- lm(log(engagement) ~ followers, data = tweets)
+
+stargazer::stargazer(
+  mod1a,
+  mod1b,
+  mod1c,
+  type = "text",
+  column.labels = c("Linear", "Quadratic", "Log Outcome"),
+  covariate.labels = c("Followers", "Followers²", "Constant"),
+  model.names = FALSE,
+  no.space = TRUE,       # tighter vertical spacing
+  align = TRUE,          # tighter horizontal alignment
+  digits = 2,
+  omit.stat = c("f", "ser")
+)
+```
+
+#### Conclusion on follower_count:
+
+Linear and quadratic (follower-count) show similar results, while log transformation on engagement does significantly improve model results - we will go with linear model for follower count.
+
+### Model 2: Engagement vs Sentiment (single X variable)
+
+Attempted different polynomials with sentiment
+
+```{r}
+# base model
+mod2b1 <- lm(log(engagement) ~ sentiment_score2d + sentiment_label2d, data = tweets) 
+
+# variation1: base model + sentiment^2
+mod2b2 <- lm(log(engagement) ~ I(sentiment_score2d^2) + sentiment_label2d, data = tweets) 
+
+#  variation2: base model + logit(sentiment)
+tweets$sentiment_logit <- log(tweets$sentiment_score2d / (1 - tweets$sentiment_score2d))
+mod2b3 <- lm(log(engagement) ~ sentiment_logit + sentiment_label2d, data = tweets) 
+
+#  variation3: base model + sentiment_score*label
+mod2b4 <- lm(log(engagement) ~ sentiment_score2d * sentiment_label2d, data = tweets)
+
+
+stargazer::stargazer(
+  mod2b1,
+  mod2b2,
+  mod2b3,
+  mod2b4,
+  type = "text",
+  column.labels = c("Linear", "Quadratic", "Logit", "Interaction"),
+  model.names = FALSE,
+  no.space = TRUE,       # tighter vertical spacing
+  align = TRUE,          # tighter horizontal alignment
+  digits = 2,
+  omit.stat = c("f", "ser")
+)
+```
+
+```{r}
+# base model
+mod2b1 <- lm(log(engagement) ~ sentiment_score2d + sentiment_label2d, data = tweets) 
+
+# variation 4: 1 dimension encoding
+mod2b5 <- lm(log(engagement) ~ sentiment_score1d, data = tweets) 
+
+# variation 5: 1 dimension encoding + interaction
+mod2b6 <- lm(log(engagement) ~ sentiment_score1d + sentiment_label2d, data = tweets) 
+
+options(width = 200)
+stargazer::stargazer(
+  mod2b1,
+  mod2b5,
+  mod2b6,
+  type = "text",
+  column.labels = c("2d", "1d", "1dlabel"),
+  model.names = FALSE,
+  # no.space = TRUE,       # tighter vertical spacing
+  align = TRUE,          # tighter horizontal alignment
+  digits = 2,
+  omit.stat = c("f", "ser")
+)
+```
+
+#### Conclusion:
+
+-   Transformation: Taking a 2nd-order polynomial (mod2b2) and taking logit(mod2b3) of sentiment score don't change the model results by much. Notably by interacting labels with score does provide further information about the relationship.
+
+-   Encoding: The 1D encoding explains more variance in engagement on its own. However, when interacted with sentiment labels, both 1D and 2D encodings perform similarly.
+
+**Conclusion** - we will keep the sentiment score in linear form and interact it with sentiment labels.
+
+Since 1d and 2d perform similarly and we are interested in studying how the strength of sentiments impact engagement, we will keep the 2d encoding.
+
+### Model 3: Engagement vs Topic (single X variable)
+
+```{r}
+# `topic` with 5 categories
+mod3a <- lm(log(engagement) ~ topic_new, data = tweets)
+
+# `topic` with 2 categories, i.e., politics vs others
+mod3b <- lm(log(engagement) ~ topic_, data = tweets)
+
+stargazer::stargazer(
+  mod3a,
+  mod3b,
+  type = "text",
+  column.labels = c("5_topic_cat", "2_topic_cat"),
+  model.names = FALSE,
+  no.space = TRUE,       # tighter vertical spacing
+  align = TRUE,          # tighter horizontal alignment
+  digits = 2
+)
+
+tweets %>% 
+  ggplot(aes(x = topic_new)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+#### Conclusion:
+
+In the first model - 'topic with 5 categories' - we can see all the topic categories has a significant relationship with engagement. Interestingly, in contrast to 'politics', all four have a (relatively) negative relationship with engagement. So we decided to compare 'politics' with 'other' for this study.
+
+### Model 4: Engagement vs word_count (single X variable)
+
+```{r}
+mod4 <- lm(log(engagement) ~ word_count, data = tweets)
+
+# variation1: base model + word_count^2 
+mod4a <- lm(log(engagement) ~ word_count + I(word_count^2), data = tweets)
+
+stargazer::stargazer(
+  mod4,
+  mod4a,
+  type = "text",
+  column.labels = c("word_count", "wc_squared"),
+  model.names = FALSE,
+  no.space = TRUE,       # tighter vertical spacing
+  align = TRUE,          # tighter horizontal alignment
+  digits = 2
+)
+```
+
+#### Conclusion:
+
+Quadratic doesn't improve the model by much, we will go with the linear form of word_count.
+
+### Model 5: Engagement vs Sentiment + Follower Count + Topic (Combined variables)
+
+```{r, results='asis'}
+mod_c1 <- lm(log(engagement) ~ sentiment_score2d + sentiment_label2d + followers + topic_, data = tweets)
+
+mod_c1a <- lm(log(engagement) ~ sentiment_score2d + sentiment_label2d + followers + topic_ + sentiment_label2d:topic_, data = tweets)
+
+stargazer::stargazer(
+  mod_c1,
+  mod_c1a,
+  type = "text",
+  column.labels = c("combined", "combined+interaction"),
+  model.names = FALSE,
+  no.space = TRUE,       # tighter vertical spacing
+  align = TRUE,          # tighter horizontal alignment
+  digits = 2
+)
+```
+
+**Conclusion:**
+
+-   `followers` significantly increases engagement and `positive_sentiment` significantly reduces engagement
+-   `politics` itself increases engagement while `topic_Other` decreases engagement
+-   When interact `politics` with `sentiment label`, we can see tweets with positive sentiment significantly decreases engagement
+
+### Model 6: Engagement vs Sentiment\*label\*topic + Follower Count + Topic (Combined variables)
+
+```{r}
+mod_c2a <- lm(log(engagement) ~ sentiment_score2d*sentiment_label2d*topic_ + followers + word_count, data = tweets)
+mod_c2b <- lm(log(engagement) ~ sentiment_score1d*sentiment_label2d*topic_ + followers + word_count, data = tweets)
+
+se1 <- vcovHC(mod_c2a, type = "HC1")
+se2 <- vcovHC(mod_c2b, type = "HC1")
+
+stargazer::stargazer(
+  mod_c2a,
+  mod_c2b,
+  se = list(se1, se2),
+  type = "text", 
+  column.labels = c("Sentiment_2d", "Sentiment_1d"),
+  model.names = FALSE,
+  # no.space = TRUE,
+  align= TRUE,
+  omit.stat = c("f", "ser")
+)
+```
+
+```{r}
+# with filtered data, no log
+mod_c3a <- lm(engagement ~ sentiment_score2d*sentiment_label2d*topic_ + followers + word_count, data = tweets_filtered)
+mod_c3b <- lm(engagement ~ sentiment_score1d*sentiment_label2d*topic_ + followers + word_count, data = tweets_filtered)
+
+
+se1 <- vcovHC(mod_c3a, type = "HC1")
+se2 <- vcovHC(mod_c3b, type = "HC1")
+
+stargazer::stargazer(
+  mod_c3a,
+  mod_c3b,
+  se = list(se1, se2),
+  type = "text", 
+  column.labels = c("Sentiment_2d", "Sentiment_1d"),
+  model.names = FALSE,
+  # no.space = TRUE,
+  align= TRUE,
+  omit.stat = c("f", "ser")
+)
+```
+
+```{r}
+resid <- mod_c2a$residuals
+fitted_vals <- mod_c2a$fitted.values
+
+df_resid <- data.frame(
+  fitted_vals = fitted_vals,
+  resid = resid
+)
+
+ggplot(df_resid, aes(x = fitted_vals , y = resid)) +
+  geom_point() +
+  labs(title = "Residuals vs Fitted values",
+       x = "Fitted values",
+       y = "Residuals") +
+  theme_minimal()
+```
+
+```{r}
+library(lmtest)
+bptest(mod_c2b)
+```
+
+### Conclusion
+
+Log of engagement produces a better model here. We can see that the 1D and 2D sentimetn score have the same coefficients but 1D has a negative coefficient for the negative sentiment label.
+
+### Model 7: Engagement vs Sentiment\*label\*topic + Follower Count + Topic + avg_engegement
+
+Average engagement is the average engagement for a user across data from 2009 to 2023.
+
+```{r}
+tweets_filtered$topic_new <- factor(tweets_filtered$topic_new)
+tweets_filtered$topic_new <- relevel(tweets_filtered$topic_new, ref = "politics")
+
+mod7a = lm(log(engagement) ~ sentiment_score*sentiment_*topic_new + followers 
+             , data = tweets_filtered)
+
+mod7b = lm(log(engagement) ~ sentiment_score*sentiment_*topic_new + followers + avg_engagement 
+             , data = tweets_filtered)
+
+
+stargazer::stargazer(
+  mod7a, mod7b,
+  type="text")
+
+```
+
+### Conclusion
+
+Adding in the users average engagement changes the followers coefficient goes to nearly 0 meaning that average engagement and followers explain some of the same variance of the model. Additionally, there is a concern here that average user engagement corelates with to the topic as well. We decided to remove average user engagement because we want to see the effects of topic and we worry that they will be reduced by adding in this variable.
+
+### Model 8: Adding hashtag_bool, hashtag count, mention_count & readability to see if imporoves the model
+
+```{r}
+
+mod_base = lm(log(engagement) ~ sentiment_score*sentiment_*topic_ + followers + word_count
+             , data = tweets_filtered)
+
+mod_hash_count = lm(log(engagement) ~ sentiment_score*sentiment_*topic_ + followers + word_count + hashtag_count
+             , data = tweets_filtered)
+
+mod_hash_bool = lm(log(engagement) ~ sentiment_score*sentiment_*topic_ + followers + word_count + hashtag_bool
+             , data = tweets_filtered)
+
+mod_mention = lm(log(engagement) ~ sentiment_score*sentiment_*topic_ + followers + word_count + mention_count
+             , data = tweets_filtered)
+
+mod_readabiliy = lm(log(engagement) ~ sentiment_score*sentiment_*topic_ + followers + word_count + textstat_readability
+             , data = tweets_filtered)
+
+
+stargazer::stargazer(
+  mod_base, mod_hash_count,mod_hash_bool, mod_mention, mod_readabiliy,
+  type="text")
+
+```
+
+### Conclusion
+
+All of these additional variables are significant, but none improve the R\^2 significantly and none have a better f-statistic than the original model. We chose to not include them.
+
+## Model 9: Comparing likes, retweets, replies and quotes
+
+```{r}
+
+tweets_filtered$topic_ <- factor(tweets_filtered$topic_)
+tweets_filtered$topic_ <- relevel(tweets_filtered$topic_, ref = "politics")
+
+tweets_filtered$sentiment_label <- factor(tweets_filtered$sentiment_label)
+tweets_filtered$sentiment_label <- relevel(tweets_filtered$sentiment_label, ref = "negative")
+
+# Create a z-score for each feature that is not catagorical 
+tweets_z = tweets_filtered %>% 
+  mutate(
+    followers = scale(followers)[,1],
+    word_count = scale(word_count)[,1],
+    engagement = scale(engagement)[,1],
+    likes = scale(likes)[,1],
+    retweets = scale(retweets)[,1],
+    replies = scale(replies)[,1], 
+    quotes = scale(quotes)[,1]
+  )
+
+
+lm_log = lm(log(engagement) ~ sentiment_score*sentiment_*topic_ + followers + word_count
+             , data = tweets_z)
+
+lm_replies = lm(log(replies) ~ sentiment_score*sentiment_*topic_ + followers + word_count
+             , data = tweets_z)
+
+lm_likes = lm(log(likes) ~ sentiment_score*sentiment_*topic_ + followers + word_count
+             , data = tweets_z)
+
+lm_retweets = lm(log(retweets) ~ sentiment_score*sentiment_*topic_ + followers + word_count
+             , data = tweets_z)
+
+lm_replies = lm(log(replies) ~ sentiment_score*sentiment_*topic_ + followers + word_count
+             , data = tweets_z)
+
+lm_quotes = lm(log(quotes) ~ sentiment_score*sentiment_*topic_ + followers + word_count
+             , data = tweets_z)
+
+
+
+stargazer::stargazer(
+  lm_log, 
+  lm_likes,
+  lm_retweets,
+  lm_replies,
+  lm_quotes,
+  type="text")
+```
+
+## Conclusion
+
+Retweets have the biggest increase in engagement as the strength of sentiment increases. Interestingly this relationship is stronger than with replies and likes. There is not a statistically significant relationship between strength of sentiment and quotes for negative politics.
+
+## Model 10: Removing outliers
+
+```{r}
+# filter out tweets with top 2% engagement scores
+engagement_98 <- quantile(tweets$engagement, 0.98, na.rm = TRUE)
+
+tweets_filtered$topic_ <- factor(tweets_filtered$topic_)
+tweets_filtered$topic_ <- relevel(tweets_filtered$topic_, ref = "politics")
+
+tweets_filtered$sentiment_label <- factor(tweets_filtered$sentiment_label)
+tweets_filtered$sentiment_label <- relevel(tweets_filtered$sentiment_label, ref = "negative")
+
+mod1_log = lm(log(engagement) ~ sentiment_score*sentiment_*topic_ + followers + word_count + hashtag_bool
+             , data = tweets_filtered)
+
+mod1_log_no_outliers = lm(log(engagement) ~ sentiment_score*sentiment_*topic_ + followers + word_count + hashtag_bool
+             , data = tweets_filtered %>% filter(engagement < engagement_98))
+
+stargazer::stargazer(
+  mod1_log,mod1_log_no_outliers, 
+  type="text")
+```
+
+Residuals vs fitted values with outliers removed
+
+```{r}
+library(tidyverse)
+library(patchwork)
+hist(resid(mod1_log_no_outliers), breaks = 30, main = "Histogram of Residuals: Outliers removed", xlab = "Residuals")
+hist(resid(mod1_log), breaks = 30, main = "Histogram of Residuals: Outliers not removed", xlab = "Residuals")
+
+
+```
+
+## Conclusion
+
+Removing outliers does not help make the residuals more normal.
+
+## Model 11: 4 separate models to ease interpretation, Without log
+
+```{r}
+library(stargazer)
+library(sandwich)
+
+tweets_negative_politics <- tweets_filtered %>% 
+  filter(sentiment_label == "negative", 
+         topic_ == "politics")
+
+tweets_positive_politics <- tweets_filtered %>% 
+  filter(sentiment_label == "positive", 
+         topic_ == "politics")
+
+tweets_negative_other <- tweets_filtered %>% 
+  filter(sentiment_label == "negative", 
+         topic_ == "other")
+
+tweets_positive_other <- tweets_filtered %>% 
+  filter(sentiment_label == "positive", 
+         topic_ == "other")
+
+neg_politics = lm(engagement ~ sentiment_score
+             + followers
+             + word_count
+             , data = tweets_negative_politics)
+
+n_pol = neg_politics
+
+
+pos_politics = lm(engagement ~ sentiment_score
+             + followers
+             + word_count
+             , data = tweets_positive_politics)
+
+p_pol = pos_politics
+
+neg_other = lm(engagement ~ sentiment_score
+             + followers
+             + word_count
+             , data = tweets_negative_other)
+
+n_ot = neg_other
+
+pos_other = lm(engagement ~ sentiment_score
+             + followers
+             + word_count
+             , data = tweets_positive_other)
+
+p_ot = pos_other
+
+# Compute robust standard errors for each model
+np <- vcovHC(neg_politics, type = "HC3")
+pp <- vcovHC(pos_politics, type = "HC3")
+no <- vcovHC(neg_other, type = "HC3")
+po <- vcovHC(pos_other, type = "HC3")
+
+# Use stargazer to display the regression results with robust standard errors
+stargazer::stargazer(
+  n_pol, 
+  p_pol,
+  n_ot, 
+  p_ot,
+  type = "text", 
+  column.labels = c("Negative Politics", "Positive Politics", "Negative Other", "Positive Other"),
+  model.names = FALSE,
+  vcov = list(np, 
+              pp,
+              no, 
+              po)
+)
+```
+
+Normally distributed residuals? No
+
+```{r}
+residuals <- c(resid(neg_politics), resid(pos_politics), resid(neg_other), resid(pos_other))
+hist(residuals, breaks = 30, main = "Histogram of Residuals", xlab = "Residuals")
+```
+
+## Conclusion
+
+This model is very interpretable. As you go from completely neutral to completely negative for politics you increase engagement by 553 on average, holding everything else constant. This model is not trustworthy though because it has highly skewed residuals. We will use the next model, that is less interpretable, but has normally distributed residuals.
+
+## Model 12: 4 separate models with log
+
+### FINAL MODEL
+
+```{r}
+library(stargazer)
+library(sandwich)
+
+tweets_negative_politics <- tweets_filtered %>% 
+  filter(sentiment_label == "negative", 
+         topic_ == "politics")
+
+tweets_positive_politics <- tweets_filtered %>% 
+  filter(sentiment_label == "positive", 
+         topic_ == "politics")
+
+tweets_negative_other <- tweets_filtered %>% 
+  filter(sentiment_label == "negative", 
+         topic_ == "other")
+
+tweets_positive_other <- tweets_filtered %>% 
+  filter(sentiment_label == "positive", 
+         topic_ == "other")
+
+neg_politics = lm(log(engagement) ~  sentiment_score + followers + word_count
+             , data = tweets_negative_politics)
+
+n_pol = neg_politics # shorten for stargazer 
+
+pos_politics = lm(log(engagement) ~ sentiment_score + followers + word_count
+             , data = tweets_positive_politics)
+
+p_pol = pos_politics# shorten for stargazer 
+
+neg_other = lm(log(engagement) ~  sentiment_score + followers + word_count
+             , data = tweets_negative_other)
+
+n_ot = neg_other # shorten for stargazer 
+
+pos_other = lm(log(engagement) ~ sentiment_score + followers + word_count
+             , data = tweets_positive_other)
+
+p_ot = pos_other
+
+# Compute robust standard errors for each model
+np <- vcovHC(neg_politics, type = "HC3")
+pp <- vcovHC(pos_politics, type = "HC3")
+no <- vcovHC(neg_other, type = "HC3")
+po <- vcovHC(pos_other, type = "HC3")
+
+# Use stargazer to display the regression results with robust standard errors
+stargazer::stargazer(
+  n_pol, 
+  p_pol,
+  n_ot, 
+  p_ot,
+  type = "text", 
+  column.labels = c("Negative Politics", "Positive Politics", "Negative Other", "Positive Other"),
+  model.names = FALSE,
+  vcov = list(np, 
+              pp,
+              no, 
+              po)
+)
+```
+
+### Normally distributed residuals? Yes
+
+```{r}
+residuals <- c(resid(neg_politics), resid(pos_politics), resid(neg_other), resid(pos_other))
+hist(residuals, breaks = 30, main = "Histogram of Residuals: with log(engagement)", xlab = "Residuals")
+```
+
+## Conclusion
+
+This is the best and more interpretable model yet.
+
+## Model 12: Same as final model but with 1D sentiment column
+
+```{r}
+library(stargazer)
+library(sandwich)
+
+tweets_negative_politics <- tweets_filtered %>% 
+  filter(sentiment_label == "negative", 
+         topic_ == "politics")
+
+tweets_positive_politics <- tweets_filtered %>% 
+  filter(sentiment_label == "positive", 
+         topic_ == "politics")
+
+tweets_negative_other <- tweets_filtered %>% 
+  filter(sentiment_label == "negative", 
+         topic_ == "other")
+
+tweets_positive_other <- tweets_filtered %>% 
+  filter(sentiment_label == "positive", 
+         topic_ == "other")
+
+neg_politics = lm(log(engagement) ~ 
+              sentiment_1dim
+             + followers
+             + word_count
+             , data = tweets_negative_politics)
+
+n_pol = neg_politics # shorten for stargazer 
+
+pos_politics = lm(log(engagement) ~ 
+                  sentiment_1dim
+             + followers
+             + word_count
+             , data = tweets_positive_politics)
+
+p_pol = pos_politics# shorten for stargazer 
+
+neg_other = lm(log(engagement) ~ 
+               sentiment_1dim
+             + followers
+             + word_count
+             , data = tweets_negative_other)
+
+n_ot = neg_other # shorten for stargazer 
+
+pos_other = lm(log(engagement) ~ 
+               sentiment_1dim
+             + followers
+             + word_count
+             , data = tweets_positive_other)
+
+p_ot = pos_other
+
+# Compute robust standard errors for each model
+np <- vcovHC(neg_politics, type = "HC3")
+pp <- vcovHC(pos_politics, type = "HC3")
+no <- vcovHC(neg_other, type = "HC3")
+po <- vcovHC(pos_other, type = "HC3")
+
+# Use stargazer to display the regression results with robust standard errors
+stargazer::stargazer(
+  n_pol, 
+  p_pol,
+  n_ot, 
+  p_ot,
+  type = "text", 
+  column.labels = c("Negative Politics", "Positive Politics", "Negative Other", "Positive Other"),
+  model.names = FALSE,
+  vcov = list(np, 
+              pp,
+              no, 
+              po)
+)
+```
+
+## Conclusion
+
+This model produces the same results, but with negative slopes for the negative labels which makes it easy to show on a 1D plot (negative sentiment on the right side and postive on the left side).
