@@ -49,7 +49,7 @@ This repository contains the final project for UC Berkeley Masters in Data Scinc
 **Project Contributors**<br>
 * Mannan Mishra: mannan_mishra@berkeley.edu
 * Maagie Royal: mroyal7@.berkeley.edu,
-* Lyn Wang: fulingw@ischool.berkeley.edu
-* Ale Alvarez: alexalva@ischool.berkeley.edu <br><br>
+* Lyn Wang: fulingw@berkeley.edu
+* Ale Alvarez: alexalva@berkeley.edu <br><br>
 
 **Final Report:** [link](https://github.com/mroyal29/portfolio/blob/main/Sentiment%20Asymmetry%20in%20Social%20Media/Report.pdf)<br><br>
