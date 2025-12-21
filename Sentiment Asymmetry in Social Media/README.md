@@ -21,24 +21,24 @@ This repository contains the final project for UC Berkeley Masters in Data Scinc
 
 **Feature Engineering & NLP**
 * Language Detection
-        * langdetect to retain only English-language tweets
+    * langdetect to retain only English-language tweets
 * Topic Classification
-        * [Twitter-specific RoBERTA model for topic classification](https://huggingface.co/cardiffnlp/tweet-topic-base-multilingual)
-        * Tweets classified as:
-                * Politics (News & Social Concern)
-                * Other
+    * [Twitter-specific RoBERTA model for topic classification](https://huggingface.co/cardiffnlp/tweet-topic-base-multilingual)
+    * Tweets classified as:
+        * Politics (News & Social Concern)
+        * Other
 * Sentiment Analysis
-        * [Twitter-specific RoBERTa model for sentiment classification](https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest)
+    * [Twitter-specific RoBERTa model for sentiment classification](https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest)
 
 **Modeling Approach:**
 * Model Type: Ordinary Least Squares (OLS) regression
 * Outcome Variable: Log-transformed engagement score
 * Controls:
-           * Follower count
-           * Word count
+    * Follower count
+    * Word count
 * Rationale:
-        * Linear models allow direct interpretation of sentiment–engagement relationships
-        * Focused on understanding direction, magnitude, and differences across sentiment-topic combinations
+    * Linear models allow direct interpretation of sentiment–engagement relationships
+    * Focused on understanding direction, magnitude, and differences across sentiment-topic combinations
 
 **Key Findings**
 * Negative political tweets generate approximately 176 more engagement than neutral political tweets
