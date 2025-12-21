@@ -12,11 +12,11 @@ This repository contains the final project for UC Berkeley Masters in Data Scinc
 * Reservoir sampling from 100M+ tweets to enable efficient, unbiased selection
 * Restricted to March 2023 to align tweet timing with follower counts
 * Filtered out:
-         * Non-English tweets
-         * Replies and zero-engagement tweets
-           * Tweets containing links or videos
-           * Users with <100 followers or in the top 5% by follower count
-         * Extremely short (1–2 words) or long (>75 words) tweets
+    * Non-English tweets
+    * Replies and zero-engagement tweets
+    * Tweets containing links or videos
+    * Users with <100 followers or in the top 5% by follower count
+    * Extremely short (1–2 words) or long (>75 words) tweets
 * Final analytic dataset: 115,258 tweets
 
 **Feature Engineering & NLP**
