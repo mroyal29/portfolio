@@ -1,4 +1,5 @@
 # EV Charge Time Prediction
+Summer 2025
 
 ## Overview
 This project predicts electric vehicle (EV) battery charging time remaining using machine learning on real-world fleet data. Unlike gas-powered vehicles that refuel quickly and predictably, EV charging is highly variable and time-consuming, creating challenges for travel planning and fleet management.
@@ -39,7 +40,6 @@ Developed comprehensive data quality procedures leveraging my deep understanding
 * **Handled data collection bugs**: Removed rows with missing values from unknown vehicle models and sessions with invalid zipcodes that prevented temperature data integration
 * **Engineered features**: Derived days in service (for battery degradation modeling), energy/time deltas between timesteps, and the target variable (time remaining until final SOC)
 * **Scaled and encoded data**: Applied z-score normalization and one-hot encoding for categorical variables (vehicle make, model, type)
-* **Dataset Scale**: Managed 50,902 initial charging sessions, refining to 39,518 high-quality sessions (1,182,368 datapoints) after cleaning
 
 ## Model Standardization & Training
 
@@ -87,10 +87,10 @@ XGBoost performed best for cold predictions (first point of session: 10.05 min M
 
 ## Technologies Used
 
-* **Data Platform**: Databricks, SQL
+* **Data Platform**: Databricks
 * **Machine Learning**: scikit-learn (Random Forest), XGBoost
 * **Deep Learning**: TensorFlow/Keras
-* **Data Processing**: SQL, pyspark, pandas, numpy
+* **Data Processing**: SQL, PySpark, pandas, numpy
 * **Hyperparameter Tuning**: Keras Tuner, sklearn RandomizedSearchCV
 * **External APIs**: Visual Crossing Weather API
 
