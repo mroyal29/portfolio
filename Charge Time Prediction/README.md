@@ -17,7 +17,7 @@ This project was conducted as part of my work at **Camber**, a fleet charging ma
 
 As project lead, I was responsible for the entire data infrastructure and pipeline. I had built Camber's data platform in Databricks (our data lake) and spent considerable time ensuring data quality of charger asset data and building out the vehicle dataset that provided make, model, year, and battery capacity information. This gave me direct access to production data and deep understanding of data quality issues inherent in real-world EV charging operations.
 
-The goal was to support **Camber Core**, Camber's software platform that enables real-time fleet monitoring and management, with more accurate charge time predictions.
+The goal was to support **Camber Core**, Camber's software platform that enables real-time fleet monitoring and management, with a new charge time prediction feature.
 
 ## Data Platform & Acquisition
 
@@ -51,7 +51,7 @@ Spearheaded efforts to keep all models comparable and prevent data leakage:
 
 ## Models Trained
 
-Built and trained six different architectures:
+I built and trained six different architectures:
 
 1. **Linear Regression** - Keras TensorFlow baseline without hidden layers (40 min MAE)
 2. **Random Forest** - sklearn RandomForestRegressor with overfitting detection (21.91 min MAE)
@@ -71,7 +71,7 @@ The GRU model achieved dramatic improvement over the baseline formula:
 * **15.00% MAPE**
 * **Only 63,000 parameters** (3% of LSTM's size, suitable for production)
 
-XGBoost performed best for cold predictions (first point of session: 15.76 min MAE vs GRU's 15.50 min MAE), but the GRU's 20× smaller parameter count and consistently strong performance across both cold-start and sequential predictions make it the recommended model for production deployment in Camber Core.
+XGBoost performed best for cold predictions (first point of session: 10.05 min MAE vs GRU's 15.50 min MAE), so this model could be deployed as well for the cases where there is no historical data showing how quickly the vehicle has been charging. 
 
 ## Analysis & Insights
 
@@ -82,22 +82,21 @@ XGBoost performed best for cold predictions (first point of session: 15.76 min M
 ## Future Work
 
 * **Mixed physics-ML approach**: Incorporate the physics formula directly into the loss function or augment training data with physics-based charge curves across a continuous spread of power values and battery capacities to improve generalization to unseen vehicle/charger combinations
-* **Address underrepresented subgroups**: Implement data augmentation (physics models), oversampling, or duplicate data for rare vehicle models to improve performance on edge cases
+* **Address underrepresented subgroups**: Implement data augmentation, oversampling, or duplicate data for rare vehicle models to improve performance on edge cases
 * **Train on full-resolution data**: Use non-downsampled minute-by-minute data with additional computing resources to capture finer-grained temporal patterns
-* **Deploy to production**: Integrate GRU model into Camber Core platform for real-time charge time predictions
 
 ## Technologies Used
 
 * **Data Platform**: Databricks, SQL
 * **Machine Learning**: scikit-learn (Random Forest), XGBoost
 * **Deep Learning**: TensorFlow/Keras
-* **Data Processing**: SQL, spark, pandas, numpy
+* **Data Processing**: SQL, pyspark, pandas, numpy
 * **Hyperparameter Tuning**: Keras Tuner, sklearn RandomizedSearchCV
 * **External APIs**: Visual Crossing Weather API
 
 ## Key Takeaways
 
-* **Sequential models outperform regression models** for time-series charging data (GRU: 12.8 min vs XGBoost: 15.76 min MAE)
+* **Sequential models outperform regression models** for time-series charging data in cases other then the cold start (GRU: 12.8 min vs XGBoost: 15.76 min MAE)
 * **Simpler architectures can outperform complex ones**: GRU with 63K parameters beat LSTM with 2.1M parameters
 * **Data quality infrastructure is foundational**: Building reliable charger asset and vehicle datasets enabled high-quality model training
 * **Physics-informed features are critical**: Models that properly weighted battery capacity, SOC, and power (the physics formula components) generalized better
