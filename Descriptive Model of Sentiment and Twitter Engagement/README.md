@@ -48,7 +48,7 @@ This repository contains the final project for UC Berkeley Masters in Data Scinc
 
 **Project Contributors**<br>
 * Mannan Mishra: mannan_mishra@berkeley.edu
-* Maagie Royal: mroyal7@.berkeley.edu,
+* Maagie Royal: mroyal7@berkeley.edu,
 * Lyn Wang: fulingw@berkeley.edu
 * Ale Alvarez: alexalva@berkeley.edu <br><br>
 
