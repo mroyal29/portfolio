@@ -102,3 +102,9 @@ XGBoost performed best for cold predictions (first point of session: 10.05 min M
 * **Physics-informed features are critical**: Models that properly weighted battery capacity, SOC, and power (the physics formula components) generalized better
 * **Temporal data splitting prevents leakage**: Critical for time-series problems to avoid models "seeing the future"
 * **Underrepresented subgroups need special attention**: Rare vehicle types struggled, suggesting need for data augmentation strategies
+
+**Project Contributors**<br>
+* Maagie Royal: mroyal7@berkeley.edu
+* Micah Collins: micah_collins@berkeley.edu
+* Alex Alvarez: alexalva@berkeley.edu 
+* Alexandra Bauche: alexandra.bauche@berkeley.edu
