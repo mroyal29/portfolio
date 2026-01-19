@@ -103,7 +103,8 @@ XGBoost performed best for cold predictions (first point of session: 10.05 min M
 * **Temporal data splitting prevents leakage**: Critical for time-series problems to avoid models "seeing the future"
 * **Underrepresented subgroups need special attention**: Rare vehicle types struggled, suggesting need for data augmentation strategies
 
-**Project Contributors**<br>
+## Project Contributors
+
 * Maagie Royal: mroyal7@berkeley.edu
 * Micah Collins: micah_collins@berkeley.edu
 * Alex Alvarez: alexalva@berkeley.edu 
