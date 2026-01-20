@@ -15,4 +15,5 @@ Masters in Data Science @ UC Berkeley
 
 ## Connect with me 
 [LinkedIn](https://www.linkedin.com/in/maggie-royal/)
+
 mroyal7@berkeley.edu
