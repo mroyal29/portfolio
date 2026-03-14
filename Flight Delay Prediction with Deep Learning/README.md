@@ -55,3 +55,10 @@ This repository contains **only the notebooks I directly worked on**, including:
 - **Spark MLlib** (features scaling, encoding, vecotrization, and baseline linear model)
 - **DBFS mount in AWS S3** (parquet files)
 - **Python**
+
+## Project Contributors
+- Maagie Royal: mroyal7@berkeley.edu
+- Lyn Wang: fulingw@berkeley.edu
+- Michael White: mwhite@berkeley.edu
+- Emily Zhao: emily_zhao@berkeley.edu
+- Aidan Connerly: aidenconnerly@berkeley.edu
